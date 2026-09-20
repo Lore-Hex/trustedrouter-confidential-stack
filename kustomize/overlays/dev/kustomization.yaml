@@ -1,0 +1,11 @@
+# An example overlay on the generated standard-mode base: its own namespace.
+#
+# To change the model, engine or any other chart value, do not patch container
+# arguments by position. Render a base for your own values instead:
+#   hack/gen-kustomize.sh my-base kustomize/helm-values-for-base.yaml my-values.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: trcs-dev
+resources:
+  - ../../base
+  - namespace.yaml

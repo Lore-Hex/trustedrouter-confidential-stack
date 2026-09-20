@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "trcs.fullname" . }}-check
+  labels:
+    app.kubernetes.io/name: {{ include "trcs.name" . }}-check
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+    app.kubernetes.io/part-of: trustedrouter-confidential-stack
+    {{- if .Values.labels.chart }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | quote }}
+    {{- end }}
+    {{- if .Values.labels.managedBy }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    {{- end }}
+    trcs.trustedrouter.com/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  serviceAccountName: {{ include "trcs.fullname" . }}
+  # A client only: an ordinary pod, in every mode.
+  containers:
+    - name: check-endpoint
+      image: {{ include "trcs.shimImage" . | quote }}
+      imagePullPolicy: {{ .Values.shim.image.pullPolicy }}
+      # The distroless image has no shell. This small wrapper runs /trcs
+      # check-endpoint and maps exit 3 to success only when the mode is coco.
+      command: [/trcs-helm-test]
+      args:
+        - {{ .Values.tee.mode | quote }}
+        - {{ printf "https://%s:%v" (include "trcs.fullname" .) .Values.service.port | quote }}
+        - --expect-tee
+        - {{ if eq .Values.tee.mode "none" }}none{{ else }}any{{ end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+        seccompProfile:
+          type: RuntimeDefault

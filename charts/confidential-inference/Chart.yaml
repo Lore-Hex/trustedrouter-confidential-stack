@@ -1,0 +1,6 @@
+apiVersion: v2
+name: confidential-inference
+description: TLS-bound evidence and a loopback inference endpoint; hardware policy belongs to the relying party.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

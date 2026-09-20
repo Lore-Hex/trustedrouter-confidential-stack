@@ -1,0 +1,64 @@
+# The same two containers as the Helm chart, as a dstack application.
+#
+# NOT YET RUN BY THIS PROJECT. dstack measures this compose file: its hash is
+# what a relying party accepts, so every image is pinned by digest and nothing
+# here is templated at deploy time. Replace the placeholder shim digest with a
+# real release digest before deploying; the all-zero value will not pull.
+services:
+  shim:
+    image: ghcr.io/lore-hex/trcs@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    command:
+      - shim
+      - --listen=:8443
+      - --upstream=http://127.0.0.1:8000
+      # dstack's production path is Intel TDX. Its AMD SEV-SNP support is
+      # experimental; change this only if your dstack host says so.
+      - --tee=tdx
+      - --require-tee
+      # EXPERIMENTAL: the dstack guest agent API v1 ships in dstack 0.6.0.
+      - --evidence-source=dstack
+      - --dstack-socket=/var/run/dstack.sock
+      - --listener-audit=enforce
+      - --model=Qwen/Qwen2.5-7B-Instruct
+      - --engine-image=vllm/vllm-openai@sha256:082ca6f035279109041ffd3fe0695cb568b29bc580b35c4f297a66a08b216c1b
+    ports:
+      - "8443:8443"
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    restart: unless-stopped
+
+  inference:
+    # vllm/vllm-openai:v0.29.0, amd64, released 2026-09-09.
+    image: vllm/vllm-openai@sha256:082ca6f035279109041ffd3fe0695cb568b29bc580b35c4f297a66a08b216c1b
+    # Share the shim's network namespace so loopback works exactly as it does
+    # in the Kubernetes pod, and the engine is never reachable from outside.
+    network_mode: "service:shim"
+    command:
+      - --model
+      - Qwen/Qwen2.5-7B-Instruct
+      - --host
+      - "127.0.0.1"
+      - --port
+      - "8000"
+      - --download-dir
+      - /models
+    environment:
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+      HF_HOME: /models/hf
+    volumes:
+      - models:/models
+    shm_size: 8gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # An engine crash restarts the engine only. The shim keeps its TLS key, so
+    # relying parties do not have to verify again.
+    restart: unless-stopped
+
+volumes:
+  models: {}

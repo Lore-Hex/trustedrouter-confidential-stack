@@ -1,0 +1,37 @@
+# NOT YET VALIDATED ON HARDWARE. Assembled from NVIDIA's Confidential Containers
+# reference architecture (1.1.0) and the Confidential Containers docs.
+# Read docs/kubernetes-coco.md before using it.
+tee:
+  mode: coco
+  coco:
+    platform: tdx
+    runtimeClassName: kata-qemu-nvidia-gpu-tdx
+    podAnnotations:
+      # Enables the in-guest evidence API the shim reads (off by default). The
+      # kernel command line is measured, so reference measurements must be the
+      # ones computed WITH this parameter.
+      io.katacontainers.config.hypervisor.kernel_params: "agent.guest_components_rest_api=all"
+      # Guest memory in MiB. An emptyDir inside a confidential guest is backed by
+      # guest memory: size this for the model cache plus the engine's host memory.
+      io.katacontainers.config.hypervisor.default_memory: "65536"
+      # REQUIRED before you serve traffic: init-data generated from the RENDERED
+      # manifest binds this pod definition into the hardware report. Without it
+      # the deployment is an evidence factory (docs/architecture.md). See
+      # docs/kubernetes-coco.md section 3.
+      # io.katacontainers.config.hypervisor.cc_init_data: "<generated>"
+inference:
+  engine: vllm
+  image:
+    # vllm/vllm-openai:v0.29.0, amd64, released 2026-09-09.
+    digest: sha256:082ca6f035279109041ffd3fe0695cb568b29bc580b35c4f297a66a08b216c1b
+  gpu:
+    # The passthrough resource the current NVIDIA reference architecture
+    # advertises. Confirm with: kubectl describe node | grep nvidia.com/
+    resourceName: nvidia.com/pgpu
+    count: 1
+shim:
+  image:
+    # PLACEHOLDER: no release exists yet. This digest will not pull.
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+nodeSelector:
+  kubernetes.io/arch: amd64

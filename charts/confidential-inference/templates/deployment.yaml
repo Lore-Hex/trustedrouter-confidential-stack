@@ -1,0 +1,254 @@
+{{- include "trcs.guardrails" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trcs.fullname" . }}
+  labels:
+    {{- include "trcs.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "trcs.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "trcs.selectorLabels" . | nindent 8 }}
+      {{- $annotations := deepCopy .Values.podAnnotations }}
+      {{- if eq .Values.tee.mode "coco" }}
+      {{- $annotations = mergeOverwrite $annotations .Values.tee.coco.podAnnotations }}
+      {{- if and (eq .Values.inference.cache.type "pvc") .Values.tee.coco.allowHostProvidedCache }}
+      {{- $annotations = mergeOverwrite $annotations (dict "trcs.trustedrouter.com/allow-host-provided-cache" "true") }}
+      {{- end }}
+      {{- end }}
+      {{- with $annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      serviceAccountName: {{ include "trcs.fullname" . }}
+      {{- if eq .Values.tee.mode "coco" }}
+      runtimeClassName: {{ .Values.tee.coco.runtimeClassName | quote }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: inference
+          image: {{ include "trcs.engineImage" . | quote }}
+          imagePullPolicy: {{ .Values.inference.image.pullPolicy }}
+          {{- if .Values.inference.command }}
+          command:
+            {{- toYaml .Values.inference.command | nindent 12 }}
+          {{- else if eq .Values.inference.engine "sglang" }}
+          command: [python3, -m, sglang.launch_server]
+          {{- end }}
+          args:
+            {{- if .Values.inference.args }}
+            {{- toYaml .Values.inference.args | nindent 12 }}
+            {{- else }}
+            - {{ if eq .Values.inference.engine "sglang" }}--model-path{{ else }}--model{{ end }}
+            - {{ .Values.inference.model | quote }}
+            {{- with .Values.inference.revision }}
+            - --revision
+            - {{ . | quote }}
+            {{- end }}
+            {{- with .Values.inference.servedModelName }}
+            - --served-model-name
+            - {{ . | quote }}
+            {{- end }}
+            - --host
+            - "127.0.0.1"
+            - --port
+            - "8000"
+            - --download-dir
+            - /models
+            {{- if gt (int .Values.inference.gpu.count) 1 }}
+            - {{ if eq .Values.inference.engine "sglang" }}--tp-size{{ else }}--tensor-parallel-size{{ end }}
+            - {{ .Values.inference.gpu.count | quote }}
+            {{- end }}
+            {{- if and (eq .Values.inference.engine "sglang") .Values.inference.apiKeySecret }}
+            # SGLang documents only the flag; Kubernetes expands $(VAR) in args.
+            - --api-key
+            - $(TRCS_ENGINE_API_KEY)
+            {{- end }}
+            {{- with .Values.inference.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- end }}
+          env:
+            {{- if ne .Values.inference.engine "sglang" }}
+            - name: VLLM_NO_USAGE_STATS
+              value: "1"
+            {{- end }}
+            - name: DO_NOT_TRACK
+              value: "1"
+            - name: HF_HOME
+              value: /models/hf
+            {{- with .Values.inference.hfTokenSecret }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: HF_TOKEN
+            {{- end }}
+            {{- with .Values.inference.apiKeySecret }}
+            - name: {{ if eq $.Values.inference.engine "sglang" }}TRCS_ENGINE_API_KEY{{ else }}VLLM_API_KEY{{ end }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: VLLM_API_KEY
+            {{- end }}
+          securityContext:
+            {{- $security := mergeOverwrite (deepCopy .Values.inference.securityContext) (dict "allowPrivilegeEscalation" false "capabilities" (dict "drop" (list "ALL")) "seccompProfile" (dict "type" "RuntimeDefault")) }}
+            {{- toYaml $security | nindent 12 }}
+          {{- if gt (int .Values.inference.gpu.count) 0 }}
+          resources:
+            limits:
+              {{ default "nvidia.com/gpu" .Values.inference.gpu.resourceName | quote }}: {{ .Values.inference.gpu.count }}
+            requests:
+              {{ default "nvidia.com/gpu" .Values.inference.gpu.resourceName | quote }}: {{ .Values.inference.gpu.count }}
+          {{- end }}
+          {{- if .Values.inference.livenessProbe.enabled }}
+          # Restarts the engine, never the shim: see values.yaml.
+          livenessProbe:
+            exec:
+              command:
+                {{- if .Values.inference.livenessProbe.command }}
+                {{- toYaml .Values.inference.livenessProbe.command | nindent 16 }}
+                {{- else }}
+                - python3
+                - -c
+                - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"
+                {{- end }}
+            initialDelaySeconds: {{ .Values.inference.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.inference.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.inference.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.inference.livenessProbe.failureThreshold }}
+          {{- end }}
+          volumeMounts:
+            - name: models
+              mountPath: /models
+            - name: shm
+              mountPath: /dev/shm
+            {{- with .Values.inference.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        - name: shim
+          image: {{ include "trcs.shimImage" . | quote }}
+          imagePullPolicy: {{ .Values.shim.image.pullPolicy }}
+          args:
+            - shim
+            - --listen=:8443
+            - --upstream=http://127.0.0.1:8000
+            {{- if eq .Values.tee.mode "coco" }}
+            - {{ printf "--tee=%s" .Values.tee.coco.platform | quote }}
+            - --require-tee
+            - --evidence-source=coco-aa
+            - {{ printf "--coco-aa-url=%s" .Values.shim.cocoAAURL | quote }}
+            {{- else }}
+            - --tee=none
+            - {{ printf "--evidence-source=%s" .Values.shim.evidenceSource | quote }}
+            - {{ printf "--tsm-path=%s" .Values.shim.tsmPath | quote }}
+            {{- end }}
+            - {{ printf "--listener-audit=%s" .Values.shim.listenerAudit | quote }}
+            - {{ printf "--attestation-rate=%v" .Values.shim.attestationRate | quote }}
+            - {{ printf "--max-request-bytes=%v" (int64 .Values.shim.maxRequestBytes) | quote }}
+            - {{ printf "--model=%s" .Values.inference.model | quote }}
+            - {{ printf "--model-revision=%s" .Values.inference.revision | quote }}
+            - {{ printf "--engine-image=%s" (include "trcs.engineImage" .) | quote }}
+            {{- with .Values.shim.gpuEvidenceCmd }}
+            - {{ printf "--gpu-evidence-cmd=%s" . | quote }}
+            {{- end }}
+            {{- range .Values.shim.allowPathPrefixes }}
+            - {{ printf "--allow-path-prefix=%s" . | quote }}
+            {{- end }}
+            {{- range .Values.shim.tls.sans }}
+            - {{ printf "--tls-san=%s" . | quote }}
+            {{- end }}
+            {{- if .Values.shim.tls.existingSecret }}
+            - --tls-cert=/tls/tls.crt
+            - --tls-key=/tls/tls.key
+            {{- end }}
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              scheme: HTTPS
+              port: 8443
+            timeoutSeconds: 3
+          # tcpSocket, not /healthz: /healthz reflects the ENGINE, and an engine
+          # outage must never restart the shim and rotate the attested key.
+          livenessProbe:
+            tcpSocket:
+              port: 8443
+            timeoutSeconds: 3
+          startupProbe:
+            httpGet:
+              path: /healthz
+              scheme: HTTPS
+              port: 8443
+            timeoutSeconds: 3
+            failureThreshold: {{ .Values.shim.startupProbe.failureThreshold }}
+            periodSeconds: {{ .Values.shim.startupProbe.periodSeconds }}
+          {{- if or .Values.shim.tls.existingSecret .Values.shim.extraVolumeMounts }}
+          volumeMounts:
+            {{- if .Values.shim.tls.existingSecret }}
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            {{- end }}
+            {{- with .Values.shim.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+      volumes:
+        - name: models
+          {{- if eq .Values.inference.cache.type "pvc" }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.inference.cache.existingClaim | quote }}
+          {{- else }}
+          emptyDir:
+            {{- if .Values.inference.cache.sizeLimit }}
+            sizeLimit: {{ .Values.inference.cache.sizeLimit | quote }}
+            {{- else }}
+            {}
+            {{- end }}
+          {{- end }}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.inference.shmSizeLimit | quote }}
+        {{- if .Values.shim.tls.existingSecret }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.shim.tls.existingSecret | quote }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

@@ -1,0 +1,9 @@
+# Standard mode with SGLang instead of vLLM, on any cluster with an NVIDIA GPU.
+# The operator of this cluster can read all traffic.
+tee:
+  mode: none
+inference:
+  engine: sglang
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  gpu:
+    count: 1

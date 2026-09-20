@@ -1,0 +1,6 @@
+.codex-*
+build/
+bin/
+*.test
+.DS_Store
+dist/

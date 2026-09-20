@@ -1,0 +1,114 @@
+nameOverride: ""
+fullnameOverride: ""
+labels:
+  chart: true
+  managedBy: true
+tee:
+  mode: none
+  coco:
+    # sev-snp or tdx. Required in coco mode: the guest attestation agent does not
+    # say which TEE it runs in, and it must agree with the RuntimeClass below.
+    platform: ""
+    # NVIDIA reference architecture: kata-qemu-nvidia-gpu-snp or kata-qemu-nvidia-gpu-tdx.
+    runtimeClassName: ""
+    # Multi-GPU passthrough takes EVERY GPU in the node and exists only on the
+    # platforms NVIDIA lists (see docs/hardware.md).
+    allowMultiGpu: false
+    # A PersistentVolumeClaim is storage the HOST provides, and in confidential
+    # mode the host is the adversary: cached weights could be altered between
+    # runs. Refused unless you accept that explicitly.
+    allowHostProvidedCache: false
+    # Must contain the kernel_params annotation that enables the in-guest evidence
+    # API, and should contain cc_init_data. See docs/kubernetes-coco.md.
+    podAnnotations: {}
+inference:
+  # vllm (default) or sglang. See the chart README for why vLLM is the default.
+  engine: vllm
+  image:
+    # Empty repository and tag follow the engine:
+    #   vllm   -> vllm/vllm-openai:v0.29.0   (released 2026-09-09)
+    #   sglang -> lmsysorg/sglang:v0.5.20    (released 2026-09-18)
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  model: Qwen/Qwen2.5-7B-Instruct
+  revision: ""
+  servedModelName: ""
+  command: []
+  args: []
+  extraArgs: []
+  hfTokenSecret: ""
+  apiKeySecret: ""
+  gpu:
+    # Empty means nvidia.com/gpu ONLY in mode none. In coco, explicitly set the resource advertised by your node.
+    resourceName: ""
+    count: 1
+  cache:
+    type: emptyDir
+    existingClaim: ""
+    sizeLimit: ""
+  shmSizeLimit: 8Gi
+  # Set runAsUser/runAsNonRoot only when supported by the selected engine image.
+  securityContext: {}
+  extraVolumeMounts: []
+  # Restarts the ENGINE when it hangs. It must never be the shim that restarts:
+  # a new shim means a new attested TLS key, and every relying party has to
+  # verify again. The probe runs inside the engine container because the engine
+  # listens on loopback only. Both engine images ship python3.
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 4
+    # Replace for an image without python3.
+    command: []
+shim:
+  image:
+    repository: ghcr.io/lore-hex/trcs
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  # Standard mode only; coco mode always uses the guest attestation agent.
+  evidenceSource: auto
+  tsmPath: /sys/kernel/config/tsm/report
+  cocoAAURL: http://127.0.0.1:8006
+  # auto enforces whenever a TEE is in use: the shim refuses to serve while any
+  # other process in the pod listens on a non-loopback address.
+  listenerAudit: auto
+  extraVolumeMounts: []
+  gpuEvidenceCmd: ""
+  allowPathPrefixes:
+    - /v1/
+  attestationRate: 2
+  maxRequestBytes: 33554432
+  tls:
+    existingSecret: ""
+    sans:
+      - localhost
+  startupProbe:
+    failureThreshold: 360
+    periodSeconds: 10
+service:
+  type: ClusterIP
+  port: 443
+  nodePort: null
+  annotations: {}
+networkPolicy:
+  enabled: true
+  # Ingress is restricted to the shim's port. Egress restriction is OPT-IN: some
+  # CNIs (kind's kindnet among them) drop the reply packets of inbound
+  # connections once an egress policy exists, which makes the endpoint
+  # unreachable to everything except kubelet probes. Calico and Cilium are
+  # stateful and handle it correctly. Test before you enable it.
+  egress:
+    enabled: false
+    # HTTPS destinations for model download and vendor attestation services.
+    cidrs:
+      - 0.0.0.0/0
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+extraVolumes: []

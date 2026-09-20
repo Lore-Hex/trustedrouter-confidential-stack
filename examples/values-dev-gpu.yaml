@@ -1,0 +1,7 @@
+tee:
+  mode: none
+inference:
+  model: Qwen/Qwen2.5-0.5B-Instruct
+  gpu:
+    resourceName: nvidia.com/gpu
+    count: 1

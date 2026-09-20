@@ -1,0 +1,35 @@
+{{- if eq .Values.tee.mode "none" }}
+Tier: standard; the operator of this cluster can read all traffic.
+{{- else }}
+Tier candidate: attested, only after a relying party verifies fresh CPU and GPU
+signatures, measurements, TCB policy and channel binding. attested+custody also
+requires a relying-party custody allow list. Hardware integration is unvalidated.
+{{- end }}
+Use TCP pass-through to port {{ .Values.service.port }}. TLS must terminate in the shim.
+Check binding with:
+  trcs check-endpoint https://<provider-host>:{{ .Values.service.port }} --expect-tee {{ if eq .Values.tee.mode "none" }}none{{ else }}any{{ end }}
+check-endpoint checks consistency only. TEE evidence yields exit 3 and is NOT
+hardware-verified by this tool. The Helm test accepts exit 3 in coco mode only.
+{{- if and (eq .Values.tee.mode "none") (not .Values.shim.tls.existingSecret) }}
+
+The shim is serving a self-signed certificate. In standard mode nothing
+authenticates that key, so an active network attacker could impersonate this
+endpoint. Set shim.tls.existingSecret to a publicly trusted certificate before
+you take real traffic.
+{{- end }}
+{{- if eq .Values.tee.mode "coco" }}
+{{- if not (hasKey .Values.tee.coco.podAnnotations "io.katacontainers.config.hypervisor.cc_init_data") }}
+
+WARNING: no cc_init_data annotation. Until init-data binds this pod definition
+into the hardware report, this deployment is an evidence factory: another pod
+on the same host could mint indistinguishable evidence. See
+docs/kubernetes-coco.md section 3 before serving traffic.
+{{- end }}
+{{- if eq .Values.inference.engine "sglang" }}
+
+SGLang's distributed, disaggregated and multimodal transports have carried
+unauthenticated remote-code-execution bugs (CVE-2026-3059, CVE-2026-3060).
+Keep those features off. The shim's listener audit will refuse to serve if the
+engine opens a non-loopback socket.
+{{- end }}
+{{- end }}

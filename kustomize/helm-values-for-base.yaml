@@ -1,0 +1,7 @@
+# Canonical source for the generated base. Do not edit base/ directly.
+fullnameOverride: confidential-inference
+labels:
+  chart: false
+  managedBy: false
+tee:
+  mode: none

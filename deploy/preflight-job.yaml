@@ -1,0 +1,35 @@
+# OPT-IN diagnostics only. Never installed by the Helm chart.
+# This grants host access: run only on a node you administer, then delete the Job.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: trcs-preflight
+  labels:
+    trcs.trustedrouter.com/component: preflight
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        trcs.trustedrouter.com/component: preflight
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: preflight
+          image: ghcr.io/lore-hex/trcs:0.1.0
+          args: [preflight, --root=/host, --json]
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            runAsNonRoot: false
+          volumeMounts:
+            - name: host
+              mountPath: /host
+              readOnly: true
+      volumes:
+        - name: host
+          hostPath:
+            path: /
+            type: Directory

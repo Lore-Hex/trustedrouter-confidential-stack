@@ -1,0 +1,34 @@
+tee:
+  mode: none
+inference:
+  image:
+    repository: python
+    tag: 3.12-alpine
+  model: stub
+  command: [python3]
+  args: [/stub/server.py]
+  gpu:
+    count: 0
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+  extraVolumeMounts:
+    - name: stub
+      mountPath: /stub
+      readOnly: true
+  # The default exec probe needs only python3, which the stub image has.
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+shim:
+  image:
+    repository: trcs-e2e
+    tag: local
+    pullPolicy: Never
+  startupProbe:
+    failureThreshold: 30
+    periodSeconds: 2
+extraVolumes:
+  - name: stub
+    configMap:
+      name: trcs-stub
