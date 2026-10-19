@@ -92,10 +92,15 @@ func New(ctx context.Context, c Config, source attest.EvidenceSource, logs io.Wr
 		pr.SetURL(upstream)
 		// ReverseProxy removes hop-by-hop headers. Authorization is preserved.
 	}, ModifyResponse: func(resp *http.Response) error {
-		resp.Header.Set(requestIDHeader, requestID(resp.Request))
 		resp.Trailer.Del(requestIDHeader)
 		// Upgrade bodies are bidirectional streams with no HTTP trailers.
-		if resp.StatusCode != http.StatusSwitchingProtocols {
+		if resp.StatusCode == http.StatusSwitchingProtocols {
+			// ReverseProxy adds upgrade headers to the already-owned writer
+			// headers and hijacks it without calling WriteHeader. Adding our ID
+			// again would produce two response fields on the wire.
+			resp.Header.Del(requestIDHeader)
+		} else {
+			resp.Header.Set(requestIDHeader, requestID(resp.Request))
 			resp.Body = &requestIDBody{ReadCloser: resp.Body, response: resp}
 		}
 		return nil

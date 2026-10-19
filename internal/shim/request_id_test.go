@@ -94,7 +94,7 @@ func TestRequestIDPreservesUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 101 || len(resp.Header.Get(requestIDHeader)) != 32 {
+	if resp.StatusCode != 101 || len(resp.Header.Get(requestIDHeader)) != 32 || len(resp.Header.Values(requestIDHeader)) != 1 {
 		t.Fatalf("status=%d id=%q", resp.StatusCode, resp.Header.Get(requestIDHeader))
 	}
 	rw, ok := resp.Body.(io.ReadWriteCloser)
