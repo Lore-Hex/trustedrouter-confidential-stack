@@ -66,6 +66,15 @@ func TestRequestIDUnannouncedTrailers(t *testing.T) {
 }
 
 func TestRequestIDPreservesUpgrade(t *testing.T) {
+	for _, hints := range []int{0, 1, 3} {
+		t.Run(fmt.Sprintf("early-hints=%d", hints), func(t *testing.T) {
+			testRequestIDUpgrade(t, hints)
+		})
+	}
+}
+
+func testRequestIDUpgrade(t *testing.T, hints int) {
+	t.Helper()
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, rw, err := w.(http.Hijacker).Hijack()
 		if err != nil {
@@ -74,6 +83,10 @@ func TestRequestIDPreservesUpgrade(t *testing.T) {
 		}
 		defer conn.Close()
 		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+		for i := 0; i < hints; i++ {
+			_, _ = fmt.Fprint(rw, "HTTP/1.1 103 Early Hints\r\nX-Request-Id: hints-canary\r\n\r\n")
+			_ = rw.Flush()
+		}
 		_, _ = fmt.Fprint(rw, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: test\r\nX-Request-Id: engine-upgrade-canary\r\n\r\n")
 		_ = rw.Flush()
 		line, err := rw.ReadString('\n')

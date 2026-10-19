@@ -1,10 +1,12 @@
 package shim
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"io"
+	"net"
 	"net/http"
 )
 
@@ -57,6 +59,13 @@ func (w *requestIDWriter) Write(p []byte) (int, error) {
 func (w *requestIDWriter) Flush() {
 	w.Header().Set(requestIDHeader, w.id)
 	_ = http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+func (w *requestIDWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	// ReverseProxy clears headers after 1xx and writes upgrades without
+	// WriteHeader. Restore the owned ID before it writes the upgrade response.
+	w.Header().Set(requestIDHeader, w.id)
+	return http.NewResponseController(w.ResponseWriter).Hijack()
 }
 
 func (w *requestIDWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
