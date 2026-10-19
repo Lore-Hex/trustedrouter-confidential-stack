@@ -84,6 +84,7 @@ spec:
             - --listener-audit=auto
             - --attestation-rate=2
             - --max-request-bytes=33554432
+            - --max-inflight=32
             - --model=Qwen/Qwen2.5-7B-Instruct
             - --model-revision=
             - --engine-image=vllm/vllm-openai:v0.29.0

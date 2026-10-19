@@ -26,10 +26,11 @@ type Config struct {
 	Workload                                       attest.Workload
 	AttestationRate                                float64
 	MaxRequestBytes                                int64
+	MaxInflight                                    int
 }
 
 func DefaultConfig() Config {
-	return Config{Listen: ":8443", Upstream: "http://127.0.0.1:8000", TEE: "auto", EvidenceSource: "auto", TSMPath: "/sys/kernel/config/tsm/report", CocoAAURL: "http://127.0.0.1:8006", DstackSocket: "/var/run/dstack.sock", ListenerAudit: "auto", ProcNetDir: "/proc/net", TLSSANs: []string{"localhost"}, AllowPathPrefixes: []string{"/v1/"}, AttestationRate: 2, MaxRequestBytes: 33554432}
+	return Config{Listen: ":8443", Upstream: "http://127.0.0.1:8000", TEE: "auto", EvidenceSource: "auto", TSMPath: "/sys/kernel/config/tsm/report", CocoAAURL: "http://127.0.0.1:8006", DstackSocket: "/var/run/dstack.sock", ListenerAudit: "auto", ProcNetDir: "/proc/net", TLSSANs: []string{"localhost"}, AllowPathPrefixes: []string{"/v1/"}, AttestationRate: 2, MaxRequestBytes: 33554432, MaxInflight: 32}
 }
 func (c Config) validate() (*url.URL, error) {
 	if c.TEE != "auto" && c.TEE != "none" && c.TEE != "sev-snp" && c.TEE != "tdx" {
@@ -61,6 +62,9 @@ func (c Config) validate() (*url.URL, error) {
 	}
 	if c.MaxRequestBytes <= 0 || c.MaxRequestBytes == math.MaxInt64 {
 		return nil, errors.New("max-request-bytes must be positive and less than MaxInt64")
+	}
+	if c.MaxInflight < 1 || c.MaxInflight > 65536 {
+		return nil, errors.New("max-inflight must be between 1 and 65536")
 	}
 	if len(c.AllowPathPrefixes) == 0 {
 		return nil, errors.New("at least one allowed path prefix is required")

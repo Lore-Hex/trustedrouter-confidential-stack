@@ -63,6 +63,7 @@ func shimFlags(args []string) (shim.Config, error) {
 	f.StringVar(&c.Workload.EngineImage, "engine-image", "", "untrusted workload hint")
 	f.Float64Var(&c.AttestationRate, "attestation-rate", c.AttestationRate, "requests per second; burst 5")
 	f.Int64Var(&c.MaxRequestBytes, "max-request-bytes", c.MaxRequestBytes, "maximum proxied body size")
+	f.IntVar(&c.MaxInflight, "max-inflight", c.MaxInflight, "maximum concurrent proxied requests, including body reads and streams")
 	var envErr error
 	f.VisitAll(func(option *flag.Flag) {
 		value, ok := os.LookupEnv("TRCS_" + strings.ToUpper(strings.ReplaceAll(option.Name, "-", "_")))

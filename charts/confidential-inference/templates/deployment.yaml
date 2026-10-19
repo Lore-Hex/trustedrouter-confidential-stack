@@ -166,6 +166,7 @@ spec:
             - {{ printf "--listener-audit=%s" .Values.shim.listenerAudit | quote }}
             - {{ printf "--attestation-rate=%v" .Values.shim.attestationRate | quote }}
             - {{ printf "--max-request-bytes=%v" (int64 .Values.shim.maxRequestBytes) | quote }}
+            - {{ printf "--max-inflight=%v" (int .Values.shim.maxInflight) | quote }}
             - {{ printf "--model=%s" .Values.inference.model | quote }}
             - {{ printf "--model-revision=%s" .Values.inference.revision | quote }}
             - {{ printf "--engine-image=%s" (include "trcs.engineImage" .) | quote }}

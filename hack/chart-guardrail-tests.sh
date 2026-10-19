@@ -34,6 +34,8 @@ fails platform-missing 'requires tee.coco.platform' --set-string tee.coco.platfo
 fails platform-runtime-mismatch 'disagrees with a tdx runtimeClassName' --set-string tee.coco.runtimeClassName=kata-qemu-nvidia-gpu-tdx
 # The values schema rejects this before the template guardrail can.
 fails unknown-engine "must be one of 'vllm', 'sglang'" --set-string inference.engine=tgi
+fails inflight-zero 'maxInflight' --set shim.maxInflight=0
+fails inflight-overflow 'maxInflight' --set shim.maxInflight=65537
 helm template guard "$chart" -f "$base" --set inference.gpu.count=2 --set tee.coco.allowMultiGpu=true > /dev/null
 helm template guard "$chart" --set shim.tls.existingSecret=external > /dev/null
 helm template guard "$chart" -f "$base" --set inference.cache.type=pvc --set-string inference.cache.existingClaim=weights \
@@ -54,6 +56,9 @@ expect vllm-telemetry 'name: VLLM_NO_USAGE_STATS'
 expect engine-liveness "urllib.request.urlopen('http://127.0.0.1:8000/health'"
 expect shim-liveness-is-tcp 'tcpSocket:'
 expect listener-audit '--listener-audit=auto'
+expect bounded-admission '--max-inflight=32'
+render --set shim.maxInflight=7
+expect custom-admission '--max-inflight=7'
 refuse ingress-only-by-default '- Egress'
 render --set networkPolicy.egress.enabled=true
 expect egress-opt-in '- Egress'
