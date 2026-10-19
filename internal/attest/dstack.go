@@ -93,9 +93,11 @@ func (s Dstack) Collect(ctx context.Context, data [64]byte) (*CPU, error) {
 }
 
 type dstackBundle struct {
-	Vendor   string `json:"vendor"`
-	Format   string `json:"format"`
-	Evidence string `json:"evidence"`
+	Vendor     string `json:"vendor"`
+	Format     string `json:"format"`
+	Evidence   string `json:"evidence"`
+	DeviceType string `json:"device_type"`
+	DeviceID   string `json:"device_id"`
 }
 
 // decodeDstackBundles accepts a top-level list, or an object with exactly one
@@ -149,10 +151,10 @@ func (s Dstack) CollectGPU(ctx context.Context, nonce [32]byte) ([]GPUEvidence, 
 		if err != nil || len(evidence) == 0 || b.Vendor == "" || b.Format == "" {
 			return nil, errors.New("incomplete dstack GPU evidence bundle")
 		}
-		out = append(out, GPUEvidence{Vendor: b.Vendor, Format: b.Format, Nonce: nonceHex, Evidence: evidence})
+		out = append(out, GPUEvidence{Vendor: b.Vendor, Format: b.Format, Nonce: nonceHex, Evidence: evidence, DeviceType: b.DeviceType, DeviceID: b.DeviceID})
 	}
 	if len(out) == 0 {
 		return nil, errors.New("dstack AttestGpu returned no evidence")
 	}
-	return out, nil
+	return out, ValidateGPUEnvelopes(out)
 }

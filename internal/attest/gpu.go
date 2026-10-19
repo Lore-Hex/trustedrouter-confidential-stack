@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // SplitCommand parses a command and quoted arguments without invoking a shell.
@@ -69,18 +70,24 @@ func SplitCommand(s string) ([]string, error) {
 	return args, nil
 }
 
-type limitedBuffer struct{ bytes.Buffer }
+// Do not embed bytes.Buffer: its promoted ReadFrom lets io.Copy (including
+// os/exec stdout collection) bypass the bounded Write method.
+type limitedBuffer struct{ buffer bytes.Buffer }
+
+func (b *limitedBuffer) Bytes() []byte { return b.buffer.Bytes() }
+func (b *limitedBuffer) Len() int      { return b.buffer.Len() }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 8<<20 {
 		return 0, errors.New("GPU helper output too large")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 
 // CollectGPUs runs the optional operator-supplied helper. The helper prints
-// {"gpu_evidence":[{"vendor":"","format":"","evidence_b64":""}]}; the shim adds
-// the nonce and never inspects the evidence.
+// {"gpu_evidence":[{"vendor":"","format":"","evidence_b64":""}]}; entries
+// may also carry device_type (gpu|nvswitch) and device_id. The shim adds the
+// nonce but never treats envelope labels as authenticated vendor evidence.
 func CollectGPUs(ctx context.Context, command []string, nonce [32]byte) ([]GPUEvidence, error) {
 	if len(command) == 0 {
 		return nil, errors.New("gpu evidence helper not configured")
@@ -103,14 +110,23 @@ func CollectGPUs(ctx context.Context, command []string, nonce [32]byte) ([]GPUEv
 	if err := cmd.Run(); err != nil {
 		return nil, errors.New("gpu evidence helper failed")
 	}
+	return decodeHelperGPUs(output.Bytes(), nonceHex)
+}
+
+func decodeHelperGPUs(output []byte, nonceHex string) ([]GPUEvidence, error) {
+	if len(output) > 8<<20 {
+		return nil, errors.New("GPU helper output too large")
+	}
 	var wire struct {
 		Bundles []struct {
-			Vendor   string `json:"vendor"`
-			Format   string `json:"format"`
-			Evidence []byte `json:"evidence_b64"`
+			Vendor     string `json:"vendor"`
+			Format     string `json:"format"`
+			Evidence   []byte `json:"evidence_b64"`
+			DeviceType string `json:"device_type"`
+			DeviceID   string `json:"device_id"`
 		} `json:"gpu_evidence"`
 	}
-	decoder := json.NewDecoder(&output)
+	decoder := json.NewDecoder(bytes.NewReader(output))
 	if err := decoder.Decode(&wire); err != nil {
 		return nil, errors.New("invalid gpu evidence helper JSON")
 	}
@@ -125,7 +141,73 @@ func CollectGPUs(ctx context.Context, command []string, nonce [32]byte) ([]GPUEv
 		if b.Vendor == "" || b.Format == "" || len(b.Evidence) == 0 {
 			return nil, errors.New("incomplete gpu evidence bundle")
 		}
-		out = append(out, GPUEvidence{Vendor: b.Vendor, Format: b.Format, Nonce: nonceHex, Evidence: b.Evidence})
+		out = append(out, GPUEvidence{Vendor: b.Vendor, Format: b.Format, Nonce: nonceHex, Evidence: b.Evidence, DeviceType: b.DeviceType, DeviceID: b.DeviceID})
+	}
+	if err := ValidateGPUEnvelopes(out); err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+// ValidateGPUEnvelopes checks bounded, unambiguous transport labels only. It
+// does not authenticate a nonce, device identity, complete hardware inventory,
+// CC mode or firmware. Untagged legacy aggregates stay explicitly untagged.
+func ValidateGPUEnvelopes(bundles []GPUEvidence) error {
+	if len(bundles) == 0 || len(bundles) > 64 {
+		return errors.New("invalid GPU evidence bundle count")
+	}
+	seen := make(map[[3]string]bool)
+	tagged := 0
+	total := 0
+	for _, b := range bundles {
+		total += len(b.Evidence)
+		if !validEnvelopeLabel(b.Vendor) || !validEnvelopeLabel(b.Format) || len(b.Evidence) == 0 || total > 8<<20 {
+			return errors.New("invalid GPU evidence envelope")
+		}
+		if _, err := ParseNonce(b.Nonce); err != nil {
+			return errors.New("invalid GPU evidence envelope nonce")
+		}
+		if b.DeviceType == "" && b.DeviceID == "" {
+			continue
+		}
+		if (b.DeviceType != "gpu" && b.DeviceType != "nvswitch") || !validDeviceLabel(b.DeviceID) {
+			return errors.New("invalid GPU evidence device label")
+		}
+		tagged++
+		key := [3]string{b.Vendor, b.DeviceType, b.DeviceID}
+		if seen[key] {
+			return errors.New("duplicate GPU evidence device label")
+		}
+		seen[key] = true
+	}
+	if tagged != 0 && tagged != len(bundles) {
+		return errors.New("mixed tagged and aggregate GPU evidence")
+	}
+	return nil
+}
+
+// Vendor/format predate device tags and may contain MIME punctuation or spaces.
+// Bound them and reject controls without imposing the new device-ID alphabet.
+func validEnvelopeLabel(s string) bool {
+	if len(s) == 0 || len(s) > 128 || strings.TrimSpace(s) == "" || !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDeviceLabel(s string) bool {
+	if len(s) == 0 || len(s) > 128 {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_.:", r)) {
+			return false
+		}
+	}
+	return true
 }

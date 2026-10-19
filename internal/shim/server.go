@@ -244,6 +244,9 @@ func (s *Server) attestation(w http.ResponseWriter, r *http.Request) {
 		} else {
 			err = errors.New("gpu evidence helper not configured")
 		}
+		if err == nil {
+			err = attest.ValidateGPUEnvelopes(bundles)
+		}
 		if err != nil {
 			gpuErr = err.Error()
 		} else {
