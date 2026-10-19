@@ -238,7 +238,7 @@ func TestPrivacyAndHeaders(t *testing.T) {
 			t.Fatalf("logged sensitive content: %s", canary)
 		}
 	}
-	if !strings.Contains(output, `path="/v1/chat/completions"`) || !strings.Contains(output, "status=200") {
+	if !strings.Contains(output, "route=chat_completions") || !strings.Contains(output, "status=200") {
 		t.Fatal("missing access log fields")
 	}
 }
