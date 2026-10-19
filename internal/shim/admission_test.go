@@ -79,6 +79,46 @@ func TestAdmissionSlowHTTP1SenderGetsImmediate429(t *testing.T) {
 	}
 }
 
+func TestAdmissionOversizedIncompleteBodiesReleaseCapacity(t *testing.T) {
+	for _, wire := range []string{
+		"Content-Length: 5\r\n\r\n",
+		"Transfer-Encoding: chunked\r\n\r\n5\r\n12345\r\n",
+	} {
+		t.Run(strings.Split(wire, ":")[0], func(t *testing.T) {
+			c := config("")
+			c.MaxRequestBytes, c.MaxInflight = 4, 1
+			s, ts := testServer(t, c, nil, nil)
+			conn, err := tls.Dial("tcp", ts.Listener.Addr().String(), ts.Client().Transport.(*http.Transport).TLSClientConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+			if _, err := io.WriteString(conn, "POST /v1/chat/completions HTTP/1.1\r\nHost: localhost\r\n"+wire); err != nil {
+				t.Fatal(err)
+			}
+			reader := bufio.NewReader(conn)
+			resp, err := http.ReadResponse(reader, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 413 || !resp.Close {
+				t.Fatalf("status=%d close=%v", resp.StatusCode, resp.Close)
+			}
+			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := reader.ReadByte(); err != io.EOF {
+				t.Fatalf("oversized upload connection retained: %v", err)
+			}
+			if len(s.inflight) != 0 {
+				t.Fatal("oversized upload retained admission slot")
+			}
+		})
+	}
+}
+
 func TestAdmissionStreamingAndCancellation(t *testing.T) {
 	var calls atomic.Int32
 	upstreamCancelled := make(chan struct{}, 1)

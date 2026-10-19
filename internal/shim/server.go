@@ -170,6 +170,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.ContentLength > s.cfg.MaxRequestBytes {
+		stopRequestBody(w, r)
 		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -179,36 +180,47 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case s.inflight <- struct{}{}:
 		defer func() { <-s.inflight }()
 	default:
-		if r.ProtoMajor == 1 {
-			// net/http otherwise drains small unread HTTP/1 bodies before it
-			// writes the response, allowing a slow sender to delay this 429.
-			w.Header().Set("Connection", "close")
-			// finishRequest closes/drains the original body even with
-			// Connection: close. Expire reads so an absent body cannot hold
-			// this rejected connection and its goroutine indefinitely.
-			_ = http.NewResponseController(w).SetReadDeadline(time.Now())
-		}
+		stopRequestBody(w, r)
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "inference capacity exhausted", http.StatusTooManyRequests)
 		return
 	}
 	if r.Body != nil {
+		// Bound slow uploads without imposing a lifetime on response streams.
+		controller := http.NewResponseController(w)
+		_ = controller.SetReadDeadline(time.Now().Add(30 * time.Second))
 		body, err := io.ReadAll(io.LimitReader(r.Body, s.cfg.MaxRequestBytes+1))
-		r.Body.Close()
 		if int64(len(body)) > s.cfg.MaxRequestBytes {
+			stopRequestBody(w, r)
+			r.Body.Close()
 			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
 			return
 		}
 		if err != nil {
+			stopRequestBody(w, r)
+			r.Body.Close()
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
+		r.Body.Close()
+		_ = controller.SetReadDeadline(time.Time{})
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		r.ContentLength = int64(len(body))
 		r.GetBody = nil
 	}
 	s.proxy.ServeHTTP(w, r)
 }
+
+func stopRequestBody(w http.ResponseWriter, r *http.Request) {
+	if r.ProtoMajor == 1 {
+		// net/http drains unread HTTP/1 bodies on Close and finishRequest.
+		// Expire reads before either path so a missing body cannot retain a
+		// rejected connection, goroutine or inference slot indefinitely.
+		w.Header().Set("Connection", "close")
+		_ = http.NewResponseController(w).SetReadDeadline(time.Now())
+	}
+}
+
 func (s *Server) attestation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet {
