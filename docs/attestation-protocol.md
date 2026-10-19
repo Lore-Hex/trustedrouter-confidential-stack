@@ -86,6 +86,8 @@ Golden test vectors are in `attestation-vectors.json`.
     {
       "vendor": "nvidia",
       "format": "nvidia-nvattest-collect-evidence-json-v1",
+      "device_type": "gpu",
+      "device_id": "<GPU identity claimed by the collector>",
       "nonce": "<hex gpu_nonce>",
       "evidence": "<base64: the vendor tool's evidence, byte for byte>"
     }
@@ -107,13 +109,37 @@ Field rules:
 |---|---|
 | `tee` | `sev-snp`, `tdx`, or `none`. |
 | `cpu` | `null` when `tee` is `none`. `source` says how the evidence was obtained and therefore how to parse it: `configfs-tsm` (the Linux TSM report ABI, kernel 6.7+: `evidence` is the raw SEV-SNP report or TDX quote), `coco-aa` (the Confidential Containers guest attestation agent: `evidence` is that agent's evidence document), or `dstack` (the dstack guest agent: `evidence` is its versioned attestation). `provider` is the kernel's TSM provider name, or the source name where there is none. |
-| `gpu_evidence` | A list of opaque, tagged bundles. The shim never parses GPU evidence; `vendor` and `format` tell the verifier which appraiser to use. `null` when GPU evidence could not be collected, with the reason in `gpu_error`. |
+| `gpu_evidence` | A list of opaque, tagged bundles, limited to 64 entries and 8 MiB of decoded evidence. The shim never parses vendor evidence; `vendor` and `format` tell the verifier which appraiser to use. `null` when collection/envelope validation fails, with a content-free reason in `gpu_error`. |
+| `gpu_evidence[].device_type` / `device_id` | Optional paired labels. Type is `gpu` or `nvswitch`; ID is a stable collector label for that device. Tagged inventories require both labels on every entry and reject duplicate `(vendor, type, ID)` labels. Legacy aggregate evidence omits both fields and cannot satisfy a policy requiring separate device evidence. These labels are **untrusted hints**, not proof of device identity or inventory completeness. |
 | `workload` | **Hints only.** A verifier must take workload identity from measured values inside the evidence, never from this object. It exists for humans and dashboards. |
 | `confidential` | Convenience flag, true only when `tee` is not `none` and both CPU evidence and at least one GPU evidence bundle are present. **A verifier must ignore it.** |
 
 When `tee` is `none` the response is still `200` with `cpu: null`,
 `gpu_evidence: null`, `confidential: false`. A `standard` endpoint is an honest
 endpoint that says so.
+
+### Per-device collection
+
+An operator helper receives `TRCS_GPU_NONCE` and returns `gpu_evidence` entries
+with `vendor`, `format`, `evidence_b64`, and optional paired `device_type` and
+`device_id`. Emit one entry for each GPU and each required NVSwitch, preserving
+the original vendor evidence bytes. An eight-GPU/four-switch fixture therefore
+contains twelve entries, not one opaque success flag. This is a transport
+example, not a claim that a specific hardware profile requires four switches.
+
+The shim attaches the requested nonce to the envelope; **only an appraiser can
+prove that the signed vendor report actually includes that nonce**. Likewise,
+an attacker can copy valid evidence under a different label. A relying party
+must authenticate the device identity inside each report, reject repeated
+authenticated identities, compare the complete set with its pinned hardware
+profile, and require all expected GPU/fabric evidence. It must not derive the
+expected count or device identities from these labels. Never invent IDs by
+enumerating an aggregate report: use a format-aware appraiser or fail closed.
+
+Existing CoCo aggregate evidence stays untagged. The experimental dstack
+adapter preserves device labels when its response supplies them, but makes no
+claim that current deployed agents expose that shape. Transcript hashes and
+golden vectors are unchanged by these optional metadata fields.
 
 ## 5. Verification procedure
 
@@ -142,6 +168,8 @@ A relying party must, in order:
     certificate chain (NVIDIA Remote Attestation Service or a local verifier
     with current reference measurements), check the nonce, and check the GPU
     reports confidential-computing mode on with an accepted VBIOS and driver.
+    Authenticate every expected GPU and NVSwitch, compare their identities to
+    the pinned inventory, and reject missing or duplicate authenticated devices.
 11. Pin `spki`. Send inference traffic only over connections presenting that
     key.
 12. Repeat from step 1 whenever the presented key changes, and at least every

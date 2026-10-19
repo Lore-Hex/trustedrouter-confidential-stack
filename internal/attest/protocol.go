@@ -24,12 +24,16 @@ type CPU struct {
 }
 
 // GPUEvidence is an opaque, tagged bundle. The shim never parses GPU evidence;
-// Vendor and Format tell a verifier which appraiser to use.
+// Vendor and Format tell a verifier which appraiser to use. Optional device
+// labels describe inventory but are not authenticated identities; an appraiser
+// must match them to the signed vendor evidence and expected hardware policy.
 type GPUEvidence struct {
-	Vendor   string `json:"vendor"`
-	Format   string `json:"format"`
-	Nonce    string `json:"nonce"`
-	Evidence []byte `json:"evidence"`
+	Vendor     string `json:"vendor"`
+	Format     string `json:"format"`
+	Nonce      string `json:"nonce"`
+	Evidence   []byte `json:"evidence"`
+	DeviceType string `json:"device_type,omitempty"`
+	DeviceID   string `json:"device_id,omitempty"`
 }
 type Workload struct {
 	StackVersion  string `json:"stack_version"`
