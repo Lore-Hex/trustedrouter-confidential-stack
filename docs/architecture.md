@@ -31,7 +31,11 @@ sequenceDiagram
 - **`trcs shim`** is the only thing reachable from outside. It terminates TLS
   with a key generated inside the TEE, serves hardware evidence bound to that
   key, and proxies `/v1/*` to the engine without buffering streams and without
-  logging bodies, headers or query strings. It is a single static Go binary
+  logging bodies, headers or query strings. Each HTTP request receives a fresh
+  random 128-bit `X-Request-Id`, also forwarded to the engine. Client-supplied
+  and engine-supplied IDs cannot override it, including in streamed trailers.
+  The ID is a correlation handle, not a credential or attestation claim.
+  It is a single static Go binary
   with no third-party dependencies, so it can be read in one sitting.
 - The **relying party** verifies the evidence, applies policy, and pins the key.
   That is TrustedRouter's gateway, which already does exactly this for one
