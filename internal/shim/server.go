@@ -296,10 +296,43 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 			if status == 0 {
 				status = 200
 			}
-			s.logger.Printf("%s method=%q path=%q status=%d bytes=%d duration=%s", start.UTC().Format(time.RFC3339Nano), r.Method, r.URL.Path, status, lw.bytes, time.Since(start))
+			s.logger.Printf("%s request_id=%s method=%s route=%s status=%d bytes=%d duration=%s", start.UTC().Format(time.RFC3339Nano), requestID(r), methodClass(r.Method), routeClass(r.URL.Path), status, lw.bytes, time.Since(start))
 		}()
 		next.ServeHTTP(lw, r)
 	})
+}
+
+// Only fixed, low-cardinality classes may enter logs. Even a syntactically
+// valid URL path or HTTP method can contain user data.
+func methodClass(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodOptions, http.MethodConnect, http.MethodTrace:
+		return method
+	default:
+		return "OTHER"
+	}
+}
+
+func routeClass(route string) string {
+	switch route {
+	case attest.Path:
+		return "attestation"
+	case "/healthz":
+		return "health"
+	case "/v1/models":
+		return "models"
+	case "/v1/chat/completions":
+		return "chat_completions"
+	case "/v1/completions":
+		return "completions"
+	case "/v1/responses":
+		return "responses"
+	case "/v1/embeddings":
+		return "embeddings"
+	default:
+		return "other"
+	}
 }
 
 // IsClosed reports the normal result of a graceful HTTP shutdown.
