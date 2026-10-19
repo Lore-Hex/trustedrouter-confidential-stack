@@ -83,6 +83,7 @@ shim:
     - /v1/
   attestationRate: 2
   maxRequestBytes: 33554432
+  maxInflight: 32
   tls:
     existingSecret: ""
     sans:

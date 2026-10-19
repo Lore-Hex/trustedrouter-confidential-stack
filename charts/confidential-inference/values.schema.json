@@ -262,6 +262,11 @@
           "type": "number",
           "exclusiveMinimum": 0
         },
+        "maxInflight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536
+        },
         "maxRequestBytes": {
           "type": "integer",
           "minimum": 1,

@@ -39,12 +39,21 @@ func TestShimEnvironment(t *testing.T) {
 	t.Setenv("TRCS_TLS_SAN", "a,b")
 	t.Setenv("TRCS_REQUIRE_TEE", "true")
 	t.Setenv("TRCS_MAX_REQUEST_BYTES", "100")
+	t.Setenv("TRCS_MAX_INFLIGHT", "7")
 	c, err := shimFlags([]string{"--listen=:8443", "--tls-san=c", "--tls-san=d"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Listen != ":8443" || c.TEE != "none" || !c.RequireTEE || c.MaxRequestBytes != 100 || strings.Join(c.TLSSANs, ",") != "c,d" {
+	if c.Listen != ":8443" || c.TEE != "none" || !c.RequireTEE || c.MaxRequestBytes != 100 || c.MaxInflight != 7 || strings.Join(c.TLSSANs, ",") != "c,d" {
 		t.Fatalf("%+v", c)
+	}
+}
+
+func TestShimInflightCLIOverridesEnvironment(t *testing.T) {
+	t.Setenv("TRCS_MAX_INFLIGHT", "7")
+	c, err := shimFlags([]string{"--max-inflight=3"})
+	if err != nil || c.MaxInflight != 3 {
+		t.Fatalf("max-inflight=%d err=%v", c.MaxInflight, err)
 	}
 }
 func TestBadEnvironment(t *testing.T) {

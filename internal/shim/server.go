@@ -36,6 +36,7 @@ type Server struct {
 	healthURL    string
 	logger       *log.Logger
 	audit        *listenerAudit
+	inflight     chan struct{}
 }
 
 // New runs the evidence self-test before opening a listening socket. source is
@@ -75,6 +76,7 @@ func New(ctx context.Context, c Config, source attest.EvidenceSource, logs io.Wr
 	transport.Proxy = nil              // Do not send private loopback requests through environment proxies.
 	transport.DisableKeepAlives = true // Go's Transport can retry on reused connections; never retry inference.
 	s := &Server{cfg: c, source: source, tee: tee, spki: spki, gpuCommand: command, limiter: newLimiter(c.AttestationRate), logger: log.New(logs, "", 0), healthURL: upstream.String() + "/health", audit: audit}
+	s.inflight = make(chan struct{}, c.MaxInflight)
 	// The upstream origin is validated above; normalize its trailing slash.
 	health := *upstream
 	health.Path = "/health"
@@ -169,6 +171,21 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.ContentLength > s.cfg.MaxRequestBytes {
 		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	// A slot covers body buffering and the entire upstream response, including
+	// SSE. Do not queue or read an excess request's body under load.
+	select {
+	case s.inflight <- struct{}{}:
+		defer func() { <-s.inflight }()
+	default:
+		if r.ProtoMajor == 1 {
+			// net/http otherwise drains small unread HTTP/1 bodies before it
+			// writes the response, allowing a slow sender to delay this 429.
+			w.Header().Set("Connection", "close")
+		}
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "inference capacity exhausted", http.StatusTooManyRequests)
 		return
 	}
 	if r.Body != nil {

@@ -40,6 +40,16 @@ sequenceDiagram
   The ID is a correlation handle, not a credential or attestation claim.
   It is a single static Go binary
   with no third-party dependencies, so it can be read in one sitting.
+  Inference admission is bounded by `--max-inflight` (default 32, configurable
+  with `TRCS_MAX_INFLIGHT` or Helm `shim.maxInflight`). A slot covers request
+  body buffering and the full response stream. Excess requests receive `429`
+  with `Retry-After: 1` before their bodies are read; HTTP/1 connections are
+  closed to prevent an unread body from delaying rejection. Engine `503`
+  responses and their `Retry-After` headers pass through without retrying.
+  Health and attestation remain independent of inference slots; attestation
+  retains its own rate limit. This bounds concurrency, not GPU resource use
+  per request or inference duration; size limits and engine capacity still
+  need to be configured for the selected model and hardware.
 - The **relying party** verifies the evidence, applies policy, and pins the key.
   That is TrustedRouter's gateway, which already does exactly this for one
   confidential provider today (dual-source attestation fetch, full signature
