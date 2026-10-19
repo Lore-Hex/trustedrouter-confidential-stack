@@ -87,12 +87,27 @@ func New(ctx context.Context, c Config, source attest.EvidenceSource, logs io.Wr
 			}
 		}
 		pr.Out.Header.Del("Forwarded")
+		pr.Out.Header.Set(requestIDHeader, requestID(pr.In))
+		pr.Out.Trailer.Del(requestIDHeader)
 		pr.SetURL(upstream)
 		// ReverseProxy removes hop-by-hop headers. Authorization is preserved.
+	}, ModifyResponse: func(resp *http.Response) error {
+		resp.Trailer.Del(requestIDHeader)
+		// Upgrade bodies are bidirectional streams with no HTTP trailers.
+		if resp.StatusCode == http.StatusSwitchingProtocols {
+			// ReverseProxy adds upgrade headers to the already-owned writer
+			// headers and hijacks it without calling WriteHeader. Adding our ID
+			// again would produce two response fields on the wire.
+			resp.Header.Del(requestIDHeader)
+		} else {
+			resp.Header.Set(requestIDHeader, requestID(resp.Request))
+			resp.Body = &requestIDBody{ReadCloser: resp.Body, response: resp}
+		}
+		return nil
 	}, Transport: transport, FlushInterval: -1, ErrorLog: log.New(io.Discard, "", 0), ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 	}}
-	s.HTTP = &http.Server{Addr: c.Listen, Handler: s.accessLog(http.HandlerFunc(s.handle)), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second, ErrorLog: log.New(io.Discard, "", 0), TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}}
+	s.HTTP = &http.Server{Addr: c.Listen, Handler: withRequestID(s.accessLog(http.HandlerFunc(s.handle))), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second, ErrorLog: log.New(io.Discard, "", 0), TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}}
 	return s, nil
 }
 func (s *Server) Serve(l net.Listener) error         { return s.HTTP.ServeTLS(l, "", "") }
