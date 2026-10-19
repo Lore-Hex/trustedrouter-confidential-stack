@@ -120,18 +120,7 @@ func run(args []string) int {
 			fmt.Fprintln(os.Stderr, "listen failed")
 			return 1
 		}
-		done := make(chan struct{})
-		defer close(done)
-		go func() {
-			select {
-			case <-ctx.Done():
-				shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				_ = server.Shutdown(shutdown)
-			case <-done:
-			}
-		}()
-		if err = server.Serve(listener); err != nil && !shim.IsClosed(err) {
+		if err = serveUntilStopped(ctx, server, listener, 130*time.Second); err != nil {
 			fmt.Fprintln(os.Stderr, "HTTPS server failed")
 			return 1
 		}
@@ -176,4 +165,25 @@ func run(args []string) int {
 		return 1
 	}
 }
+
+// Serve returns when the listener closes, not when active streams complete.
+// Keep the process alive until Shutdown has actually drained those handlers.
+func serveUntilStopped(ctx context.Context, server *shim.Server, listener net.Listener, grace time.Duration) error {
+	served := make(chan error, 1)
+	go func() { served <- server.Serve(listener) }()
+	select {
+	case err := <-served:
+		return err
+	case <-ctx.Done():
+	}
+	shutdown, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	err := server.Shutdown(shutdown)
+	if err != nil {
+		_ = server.HTTP.Close()
+	}
+	<-served
+	return err
+}
+
 func main() { os.Exit(run(os.Args[1:])) }

@@ -1,12 +1,106 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
+	"net/http"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Lore-Hex/trustedrouter-confidential-stack/internal/shim"
 )
+
+func TestShutdownDrainsActiveTLSResponse(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		t.Run(map[bool]string{false: "drained", true: "deadline"}[deadline], func(t *testing.T) {
+			c := shim.DefaultConfig()
+			c.TEE, c.EvidenceSource, c.ListenerAudit = "none", "none", "off"
+			c.TLSSANs = []string{"127.0.0.1"}
+			server, err := shim.New(context.Background(), c, nil, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer server.HTTP.Close()
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			started, release := make(chan struct{}), make(chan struct{})
+			server.HTTP.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, "first ")
+				w.(http.Flusher).Flush()
+				close(started)
+				select {
+				case <-release:
+					_, _ = io.WriteString(w, "last")
+				case <-r.Context().Done():
+				}
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			grace := 5 * time.Second
+			if deadline {
+				grace = 20 * time.Millisecond
+			}
+			done := make(chan error, 1)
+			go func() { done <- serveUntilStopped(ctx, server, listener, grace) }()
+			roots := x509.NewCertPool()
+			cert, err := x509.ParseCertificate(server.HTTP.TLSConfig.Certificates[0].Certificate[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			roots.AddCert(cert)
+			client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}}
+			response, err := client.Get("https://" + listener.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			<-started
+			cancel()
+			if deadline {
+				select {
+				case err := <-done:
+					if !errors.Is(err, context.DeadlineExceeded) {
+						t.Fatalf("shutdown deadline reported success: %v", err)
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("shutdown deadline not enforced")
+				}
+				if _, err := io.ReadAll(response.Body); err == nil {
+					t.Fatal("forced closure was not visible to client")
+				}
+				return
+			}
+			select {
+			case err := <-done:
+				close(release)
+				t.Fatalf("exited before response drained: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(release)
+			body, err := io.ReadAll(response.Body)
+			if err != nil || string(body) != "first last" {
+				t.Fatalf("response interrupted: %v", err)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("server remained alive after draining")
+			}
+		})
+	}
+}
 
 func TestStandardLibraryOnly(t *testing.T) {
 	cmd := exec.Command("go", "list", "-deps", "-json", "./...")
