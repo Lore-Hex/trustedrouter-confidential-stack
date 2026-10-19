@@ -62,13 +62,20 @@ func TestAdmissionSlowHTTP1SenderGetsImmediate429(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 429 || !resp.Close || resp.Header.Get("Retry-After") != "1" {
 		t.Fatalf("status=%d close=%v", resp.StatusCode, resp.Close)
+	}
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.ReadByte(); err != io.EOF {
+		t.Fatalf("rejected connection was not closed: %v", err)
 	}
 }
 

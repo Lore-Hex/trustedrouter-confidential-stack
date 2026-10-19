@@ -183,6 +183,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			// net/http otherwise drains small unread HTTP/1 bodies before it
 			// writes the response, allowing a slow sender to delay this 429.
 			w.Header().Set("Connection", "close")
+			// finishRequest closes/drains the original body even with
+			// Connection: close. Expire reads so an absent body cannot hold
+			// this rejected connection and its goroutine indefinitely.
+			_ = http.NewResponseController(w).SetReadDeadline(time.Now())
 		}
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "inference capacity exhausted", http.StatusTooManyRequests)
