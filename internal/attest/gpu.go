@@ -70,13 +70,18 @@ func SplitCommand(s string) ([]string, error) {
 	return args, nil
 }
 
-type limitedBuffer struct{ bytes.Buffer }
+// Do not embed bytes.Buffer: its promoted ReadFrom lets io.Copy (including
+// os/exec stdout collection) bypass the bounded Write method.
+type limitedBuffer struct{ buffer bytes.Buffer }
+
+func (b *limitedBuffer) Bytes() []byte { return b.buffer.Bytes() }
+func (b *limitedBuffer) Len() int      { return b.buffer.Len() }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 8<<20 {
 		return 0, errors.New("GPU helper output too large")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 
 // CollectGPUs runs the optional operator-supplied helper. The helper prints
