@@ -88,12 +88,16 @@ func New(ctx context.Context, c Config, source attest.EvidenceSource, logs io.Wr
 		}
 		pr.Out.Header.Del("Forwarded")
 		pr.Out.Header.Set(requestIDHeader, requestID(pr.In))
+		pr.Out.Trailer.Del(requestIDHeader)
 		pr.SetURL(upstream)
 		// ReverseProxy removes hop-by-hop headers. Authorization is preserved.
 	}, ModifyResponse: func(resp *http.Response) error {
 		resp.Header.Set(requestIDHeader, requestID(resp.Request))
 		resp.Trailer.Del(requestIDHeader)
-		resp.Body = &requestIDBody{ReadCloser: resp.Body, trailer: resp.Trailer}
+		// Upgrade bodies are bidirectional streams with no HTTP trailers.
+		if resp.StatusCode != http.StatusSwitchingProtocols {
+			resp.Body = &requestIDBody{ReadCloser: resp.Body, response: resp}
+		}
 		return nil
 	}, Transport: transport, FlushInterval: -1, ErrorLog: log.New(io.Discard, "", 0), ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)

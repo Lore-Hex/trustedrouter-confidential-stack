@@ -65,11 +65,12 @@ func (w *requestIDWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter
 // ReverseProxy closes this body before forwarding those trailers.
 type requestIDBody struct {
 	io.ReadCloser
-	trailer http.Header
+	response *http.Response
 }
 
 func (b *requestIDBody) Close() error {
 	err := b.ReadCloser.Close()
-	b.trailer.Del(requestIDHeader)
+	// An unannounced trailer can cause Transport to allocate a new map at EOF.
+	b.response.Trailer.Del(requestIDHeader)
 	return err
 }
