@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // SplitCommand parses a command and quoted arguments without invoking a shell.
@@ -137,7 +138,10 @@ func decodeHelperGPUs(output []byte, nonceHex string) ([]GPUEvidence, error) {
 		}
 		out = append(out, GPUEvidence{Vendor: b.Vendor, Format: b.Format, Nonce: nonceHex, Evidence: b.Evidence, DeviceType: b.DeviceType, DeviceID: b.DeviceID})
 	}
-	return out, ValidateGPUEnvelopes(out)
+	if err := ValidateGPUEnvelopes(out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ValidateGPUEnvelopes checks bounded, unambiguous transport labels only. It
@@ -147,12 +151,12 @@ func ValidateGPUEnvelopes(bundles []GPUEvidence) error {
 	if len(bundles) == 0 || len(bundles) > 64 {
 		return errors.New("invalid GPU evidence bundle count")
 	}
-	seen := make(map[string]bool)
+	seen := make(map[[3]string]bool)
 	tagged := 0
 	total := 0
 	for _, b := range bundles {
 		total += len(b.Evidence)
-		if !validDeviceLabel(b.Vendor) || !validDeviceLabel(b.Format) || len(b.Evidence) == 0 || total > 8<<20 {
+		if !validEnvelopeLabel(b.Vendor) || !validEnvelopeLabel(b.Format) || len(b.Evidence) == 0 || total > 8<<20 {
 			return errors.New("invalid GPU evidence envelope")
 		}
 		if _, err := ParseNonce(b.Nonce); err != nil {
@@ -165,7 +169,7 @@ func ValidateGPUEnvelopes(bundles []GPUEvidence) error {
 			return errors.New("invalid GPU evidence device label")
 		}
 		tagged++
-		key := b.Vendor + "/" + b.DeviceType + "/" + b.DeviceID
+		key := [3]string{b.Vendor, b.DeviceType, b.DeviceID}
 		if seen[key] {
 			return errors.New("duplicate GPU evidence device label")
 		}
@@ -175,6 +179,20 @@ func ValidateGPUEnvelopes(bundles []GPUEvidence) error {
 		return errors.New("mixed tagged and aggregate GPU evidence")
 	}
 	return nil
+}
+
+// Vendor/format predate device tags and may contain MIME punctuation or spaces.
+// Bound them and reject controls without imposing the new device-ID alphabet.
+func validEnvelopeLabel(s string) bool {
+	if len(s) == 0 || len(s) > 128 || strings.TrimSpace(s) == "" || !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func validDeviceLabel(s string) bool {

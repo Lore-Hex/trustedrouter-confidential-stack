@@ -48,6 +48,9 @@ func TestGPUEnvelopeRejections(t *testing.T) {
 		{"empty-evidence", func(b *GPUEvidence) { b.Evidence = nil }},
 		{"empty-vendor", func(b *GPUEvidence) { b.Vendor = "" }},
 		{"empty-format", func(b *GPUEvidence) { b.Format = "" }},
+		{"control-format", func(b *GPUEvidence) { b.Format = "v1\nprivate" }},
+		{"control-vendor", func(b *GPUEvidence) { b.Vendor = "vendor\x00" }},
+		{"invalid-utf8-vendor", func(b *GPUEvidence) { b.Vendor = string([]byte{0xff}) }},
 		{"bad-nonce", func(b *GPUEvidence) { b.Nonce = "not-a-nonce" }},
 		{"oversized-evidence", func(b *GPUEvidence) { b.Evidence = make([]byte, (8<<20)+1) }},
 	} {
@@ -76,6 +79,15 @@ func TestGPUEnvelopeRejections(t *testing.T) {
 	wire, _ := json.Marshal(legacy)
 	if strings.Contains(string(wire), "device_") {
 		t.Fatal("legacy aggregate acquired an invented identity")
+	}
+}
+
+func TestLegacyEnvelopeMetadataPreserved(t *testing.T) {
+	nonce := strings.Repeat("a", 64)
+	wire := []byte(`{"gpu_evidence":[{"vendor":"NVIDIA Corporation","format":"application/vnd.nvidia.evidence+json; version=1","evidence_b64":"AQ=="}]}`)
+	bundles, err := decodeHelperGPUs(wire, nonce)
+	if err != nil || len(bundles) != 1 || bundles[0].Vendor != "NVIDIA Corporation" || bundles[0].Format != "application/vnd.nvidia.evidence+json; version=1" || bundles[0].DeviceID != "" || bundles[0].DeviceType != "" {
+		t.Fatalf("legacy metadata changed: %+v %v", bundles, err)
 	}
 }
 
