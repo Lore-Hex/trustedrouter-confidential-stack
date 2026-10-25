@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Lore-Hex/trustedrouter-confidential-stack/internal/attest"
 )
@@ -27,10 +28,11 @@ type Config struct {
 	AttestationRate                                float64
 	MaxRequestBytes                                int64
 	MaxInflight                                    int
+	ShutdownGrace                                  time.Duration
 }
 
 func DefaultConfig() Config {
-	return Config{Listen: ":8443", Upstream: "http://127.0.0.1:8000", TEE: "auto", EvidenceSource: "auto", TSMPath: "/sys/kernel/config/tsm/report", CocoAAURL: "http://127.0.0.1:8006", DstackSocket: "/var/run/dstack.sock", ListenerAudit: "auto", ProcNetDir: "/proc/net", TLSSANs: []string{"localhost"}, AllowPathPrefixes: []string{"/v1/"}, AttestationRate: 2, MaxRequestBytes: 33554432, MaxInflight: 32}
+	return Config{Listen: ":8443", Upstream: "http://127.0.0.1:8000", TEE: "auto", EvidenceSource: "auto", TSMPath: "/sys/kernel/config/tsm/report", CocoAAURL: "http://127.0.0.1:8006", DstackSocket: "/var/run/dstack.sock", ListenerAudit: "auto", ProcNetDir: "/proc/net", TLSSANs: []string{"localhost"}, AllowPathPrefixes: []string{"/v1/"}, AttestationRate: 2, MaxRequestBytes: 33554432, MaxInflight: 32, ShutdownGrace: 130 * time.Second}
 }
 func (c Config) validate() (*url.URL, error) {
 	if c.TEE != "auto" && c.TEE != "none" && c.TEE != "sev-snp" && c.TEE != "tdx" {
@@ -65,6 +67,9 @@ func (c Config) validate() (*url.URL, error) {
 	}
 	if c.MaxInflight < 1 || c.MaxInflight > 65536 {
 		return nil, errors.New("max-inflight must be between 1 and 65536")
+	}
+	if c.ShutdownGrace < time.Second || c.ShutdownGrace > time.Hour {
+		return nil, errors.New("shutdown-grace must be between 1s and 1h")
 	}
 	if len(c.AllowPathPrefixes) == 0 {
 		return nil, errors.New("at least one allowed path prefix is required")

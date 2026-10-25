@@ -64,6 +64,7 @@ func shimFlags(args []string) (shim.Config, error) {
 	f.Float64Var(&c.AttestationRate, "attestation-rate", c.AttestationRate, "requests per second; burst 5")
 	f.Int64Var(&c.MaxRequestBytes, "max-request-bytes", c.MaxRequestBytes, "maximum proxied body size")
 	f.IntVar(&c.MaxInflight, "max-inflight", c.MaxInflight, "maximum concurrent proxied requests, including body reads and streams")
+	f.DurationVar(&c.ShutdownGrace, "shutdown-grace", c.ShutdownGrace, "bounded active-request drain on termination, between 1s and 1h")
 	var envErr error
 	f.VisitAll(func(option *flag.Flag) {
 		value, ok := os.LookupEnv("TRCS_" + strings.ToUpper(strings.ReplaceAll(option.Name, "-", "_")))
@@ -120,7 +121,7 @@ func run(args []string) int {
 			fmt.Fprintln(os.Stderr, "listen failed")
 			return 1
 		}
-		if err = serveUntilStopped(ctx, server, listener, 130*time.Second); err != nil {
+		if err = serveUntilStopped(ctx, server, listener, c.ShutdownGrace); err != nil {
 			fmt.Fprintln(os.Stderr, "HTTPS server failed")
 			return 1
 		}
