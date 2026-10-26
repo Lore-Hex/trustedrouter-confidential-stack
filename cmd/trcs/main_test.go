@@ -156,3 +156,23 @@ func TestBadEnvironment(t *testing.T) {
 		t.Fatal("invalid boolean accepted")
 	}
 }
+
+func TestShutdownGraceConfiguration(t *testing.T) {
+	c, err := shimFlags(nil)
+	if err != nil || c.ShutdownGrace != 130*time.Second {
+		t.Fatalf("default grace=%v err=%v", c.ShutdownGrace, err)
+	}
+	t.Setenv("TRCS_SHUTDOWN_GRACE", "910s")
+	c, err = shimFlags(nil)
+	if err != nil || c.ShutdownGrace != 910*time.Second {
+		t.Fatalf("environment grace=%v err=%v", c.ShutdownGrace, err)
+	}
+	c, err = shimFlags([]string{"--shutdown-grace=20m"})
+	if err != nil || c.ShutdownGrace != 20*time.Minute {
+		t.Fatalf("CLI grace=%v err=%v", c.ShutdownGrace, err)
+	}
+	t.Setenv("TRCS_SHUTDOWN_GRACE", "not-a-duration")
+	if _, err = shimFlags(nil); err == nil {
+		t.Fatal("invalid grace environment accepted")
+	}
+}

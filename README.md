@@ -118,6 +118,21 @@ use. The software here is free; check with NVIDIA about the GPU feature.
 6. Request-body encryption to an attested key, so the binding survives
    TLS-terminating load balancers and tunnels.
 
+## Long Inference Streams
+
+`trcs shim --shutdown-grace=910s` allows active requests up to 910 seconds to
+drain after termination. The default remains 130 seconds; the accepted range
+is 1 second through 1 hour. `TRCS_SHUTDOWN_GRACE` provides the same setting,
+and the command-line option takes precedence. This changes shutdown grace,
+not an inference deadline or token limit.
+
+Configure the upstream's request deadline below the grace and the outer
+supervisor or container termination budget above it. Stop admissions before
+draining, and keep the upstream alive until the TLS front door has drained.
+An expired grace forcibly closes remaining connections and reports failure;
+it is never reported as a completed response. Longer grace does not change
+authentication, request limits, attestation or listener policy.
+
 ## Development
 
 ```
